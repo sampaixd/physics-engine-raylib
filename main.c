@@ -11,7 +11,6 @@ typedef struct shape_t
     Vector2 velocity;
     float spinningVelocity; // the speed the shape is spinning in radians/frame
     bool isGrabbed;
-
 } shape_t;
 
 typedef struct ball_t
@@ -26,6 +25,18 @@ typedef struct rect_t
     Vector2 size;
 } rect_t;
 
+typedef struct balls_list_t {
+    ball_t *balls;
+    int max;
+    int pointer;
+} balls_list_t;
+
+typedef struct rects_list_t {
+    rect_t *rects;
+    int max;
+    int pointer;
+} rects_list_t;
+
 const int screenWidth = 1280;
 const int screenHeight = 720;
 const int targetFPS = 60;
@@ -37,6 +48,23 @@ const Rectangle mapBoundraryUpper = {0, -1000, screenWidth, 1000};
 const Rectangle mapBoundraryLower = {0, screenHeight, screenWidth, 1000};
 const Rectangle mapBoundraryLeft = {-1000, 0, 1000, screenHeight};
 const Rectangle mapBoundraryRight = {screenWidth, 0, 1000, screenHeight};
+
+void AddBall(balls_list_t *balls, ball_t newBall)
+{
+    balls->balls[balls->pointer] = newBall;
+    balls->pointer += 1;
+}
+
+void IncreaseBallsListSize(balls_list_t *balls)
+{
+    balls->max *= 2;
+    balls->balls = realloc(balls->balls, sizeof(ball_t) * balls->max);
+}
+
+void IncreaseRectsListSize(rects_list_t *rects) {
+    rects->max *= 2;
+    rects->rects = realloc(rects->rects, sizeof(rect_t) * rects->max);
+}
 
 Rectangle GetRectangleFromRect_t(rect_t rect)
 {
@@ -54,13 +82,13 @@ void MoveShapeBasedOnMousePosition(Vector2 *shapePos, Vector2 *shapeVelocity, Ve
     float posX = GetMousePosition().x + mouseShapeOffset.x;
     float posY = GetMousePosition().y + mouseShapeOffset.y;
     printf("new posX: %.2f - new posY: %.2f\n"
-           "shapePosX: %.2f - shapePosY: %.2f\n", 
+           "shapePosX: %.2f - shapePosY: %.2f\n",
            posX, posY,
            shapePos->x, shapePos->y);
+    printf("velY: %.2f, velX: %.2f\n",
+           shapeVelocity->y, shapeVelocity->x);
     shapeVelocity->x = (posX - shapePos->x);
     shapeVelocity->y = (posY - shapePos->y);
-    shapePos->x = posX;
-    shapePos->y = posY;
 }
 
 // grabs shape with mouse
@@ -154,7 +182,7 @@ int main()
     // is -1 if no shape is grabbed, otherwise will be the index of the grabbed object
     // balls have their regular index, rects have their index + ballsCount
     int selectedShape = -1;
-    Vector2 mouseShapeOffset = {0,0};
+    Vector2 mouseShapeOffset = {0, 0};
     ball_t balls[1] = {};
     int ballsCount = 1;
     rect_t rects[1] = {};
@@ -173,6 +201,10 @@ int main()
         {
             selectedShape = -1;
         }
+        DrawCircleV(balls[0].base.position, balls[0].radius, RED);
+        Gravity(balls, ballsCount, rects, rectsCount);
+        MoveShapes(balls, ballsCount, rects, rectsCount);
+        HandleMapWallCollision(balls, ballsCount, rects, rectsCount);
         if (selectedShape != -1)
         {
             if (selectedShape > ballsCount - 1)
@@ -184,10 +216,6 @@ int main()
                 MoveShapeBasedOnMousePosition(&balls[selectedShape].base.position, &balls[selectedShape].base.velocity, mouseShapeOffset);
             }
         }
-        DrawCircleV(balls[0].base.position, balls[0].radius, RED);
-        Gravity(balls, ballsCount, rects, rectsCount);
-        MoveShapes(balls, ballsCount, rects, rectsCount);
-        HandleMapWallCollision(balls, ballsCount, rects, rectsCount);
         DrawText(TextFormat("ball 1 data\n"
                             "position x:y - %.2f:%.2f\n"
                             "velocity x:y - %.2f:%.2f\n"
