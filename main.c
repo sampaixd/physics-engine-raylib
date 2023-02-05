@@ -46,7 +46,7 @@ const int targetFPS = 60;
 const int listStartMax = 16;
 
 const float deltaFrameTime = 1 / (float)targetFPS;
-const float gravity = 9.82;
+const float gravity = 9.82 * 0;
 const float mapBoundraryCollisionBouce = 0.8; // 1 means no force is lost upon wall collision, everything above 1 will cause a increase in force for every collision
 // 1000 units tolerance for the velocity, if it goes beyound that it's possible for the shapes to go out of bounds
 // NOTE! the corners don't have this tolerance as of now, might fix that later
@@ -216,6 +216,23 @@ void HandleRectRectCollision(rects_list_t *rects)
 {
 }
 
+void HandleBallsCollisionVelocityChange(ball_t *ball1, ball_t *ball2, Vector2 normalVector, Vector2 tangentVector, float distanceBetweenBalls)
+{
+    float unitX = normalVector.x / distanceBetweenBalls;
+    float unitY = normalVector.y / distanceBetweenBalls;
+
+    float impulse = 2 * ball1->base.mass * ball2->base.mass * 
+    (ball1->base.velocity.x * unitX + ball1->base.velocity.y * unitY - 
+    (ball2->base.velocity.x * unitX + ball2->base.velocity.y * unitY)) / 
+    (ball1->base.mass + ball2->base.mass);
+
+    ball1->base.velocity.x -= impulse * unitX / ball1->base.mass;
+    ball1->base.velocity.y -= impulse * unitY / ball1->base.mass;
+    ball2->base.velocity.x += impulse * unitX / ball2->base.mass;
+    ball2->base.velocity.y += impulse * unitY / ball2->base.mass;
+}
+
+// 1 = bigger, -1 = smaller, 0 = equal
 Vector2 GetBallsOffset(Vector2 ball1, Vector2 ball2)
 {
     Vector2 offset = {0, 0};
@@ -238,7 +255,7 @@ Vector2 GetBallsOffset(Vector2 ball1, Vector2 ball2)
     }
     return offset;
 }
-
+// currently depricated
 float GetRadianBetweenBalls(ball_t *ball1, ball_t *ball2)
 {
 
@@ -248,9 +265,6 @@ float GetRadianBetweenBalls(ball_t *ball1, ball_t *ball2)
     double atanRadian = atan(dX / dY);
     float radian = 0;
     Vector2 ballsOffset = GetBallsOffset(ball1->base.position, ball2->base.position);
-    // checks where on the unit circle the corner is with the player as the centre
-    //  0 is right in
-    //  top right corner
     if (ballsOffset.x <= 0 && ballsOffset.y >= 0)
     {
         radian = atanRadian;
@@ -270,36 +284,39 @@ float GetRadianBetweenBalls(ball_t *ball1, ball_t *ball2)
     {
         radian = (2 * PI) - atanRadian;
     }
-    return radian; 
+    return radian;
 }
+
+void PushBallsApart(ball_t *ball1, ball_t *ball2, Vector2 normalVector, float distanceBetweenBalls)
+{
+    // get data needed
+    //float radianBetweenBalls = GetRadianBetweenBalls(ball1, ball2);
+    float intersectLength = ball1->radius + ball2->radius - distanceBetweenBalls;
+    float unitX = normalVector.x / distanceBetweenBalls;
+    float unitY = normalVector.y / distanceBetweenBalls;
+    // move balls apart
+    // note to self: could there be a smarter way to calculate the sin and cos values?
+    // with the distanceBetweenBalls and normalVector, you got the entire triangle available
+    ball1->base.position.x += unitX * intersectLength / 2;
+    ball1->base.position.y += unitY * intersectLength / 2;
+
+    ball2->base.position.x -= unitX * intersectLength / 2;
+    ball2->base.position.y -= unitY * intersectLength / 2;
+}
+
 Vector2 GetNormalVector(Vector2 ball1, Vector2 ball2)
 {
     return (Vector2){ball1.x - ball2.x, ball1.y - ball2.y};
 }
 
-// float GetRadianBetweenBalls(Vector2 ball1, Vector2 ball2)
-// {
-//     return atan((ball1.y - ball2.y) / (ball1.x - ball2.x));
-// }
-
-void PushBallsApart(ball_t *ball1, ball_t *ball2, Vector2 normalVector)
-{
-    // get data needed
-    float radianBetweenBalls = GetRadianBetweenBalls(ball1, ball2);
-    float distanceBetweenBalls = sqrt(normalVector.x * normalVector.x + normalVector.y * normalVector.y);
-    float intersectLength = ball1->radius + ball2->radius - distanceBetweenBalls;
-    // move balls apart
-    ball1->base.position.x -= sin(radianBetweenBalls) * intersectLength / 2;
-    ball1->base.position.y += cos(radianBetweenBalls) * intersectLength / 2;
-
-    ball2->base.position.x += sin(radianBetweenBalls) * intersectLength / 2;
-    ball2->base.position.y -= cos(radianBetweenBalls) * intersectLength / 2;
-}
-
 void CalculateCollisionBallBall(balls_list_t *balls, int ball1, int ball2)
 {
     Vector2 normalVector = GetNormalVector(balls->balls[ball1].base.position, balls->balls[ball2].base.position);
-    PushBallsApart(&balls->balls[ball1], &balls->balls[ball2], normalVector);
+    Vector2 tangentVector = (Vector2){-normalVector.y, normalVector.x};
+    float distanceBetweenBalls = sqrt(normalVector.x * normalVector.x + normalVector.y * normalVector.y);
+
+    PushBallsApart(&balls->balls[ball1], &balls->balls[ball2], normalVector, distanceBetweenBalls);
+    HandleBallsCollisionVelocityChange(&balls->balls[ball1], &balls->balls[ball2], normalVector, tangentVector, distanceBetweenBalls);
 }
 
 void HandleBallBallCollision(balls_list_t *balls)
@@ -340,8 +357,9 @@ int main()
     balls_list_t balls = {malloc(sizeof(ball_t) * listStartMax), listStartMax, 0};
     rects_list_t rects = {malloc(sizeof(rect_t) * listStartMax), listStartMax, 0};
 
-    HandleAddingBallToList(&balls, (ball_t){(shape_t){(Vector2){screenWidth / 2, screenHeight / 2}, 10, 0, (Vector2){0, 0}, 0, false}, 10});
-    HandleAddingBallToList(&balls, (ball_t){(shape_t){(Vector2){screenWidth / 4, screenHeight / 4}, 10, 0, (Vector2){0, 0}, 0, false}, 10});
+    HandleAddingBallToList(&balls, (ball_t){(shape_t){(Vector2){screenWidth / 2, screenHeight / 2}, 10, 0, (Vector2){0, 0}, 0, false}, 50});
+    HandleAddingBallToList(&balls, (ball_t){(shape_t){(Vector2){screenWidth / 4, screenHeight / 4}, 10, 0, (Vector2){0, 0}, 0, false}, 50});
+    HandleAddingBallToList(&balls, (ball_t){(shape_t){(Vector2){3 * screenWidth / 4, 3 * screenHeight / 4}, 50, 0, (Vector2){0, 0}, 0, false}, 50});
 
     while (!WindowShouldClose())
     {
