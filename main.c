@@ -47,7 +47,7 @@ const int listStartMax = 16;
 
 const float deltaFrameTime = 1 / (float)targetFPS;
 const float gravity = 9.82 * 0;
-const float mapBoundraryCollisionBouce = 0.8; // 1 means no force is lost upon wall collision, everything above 1 will cause a increase in force for every collision
+const float mapBoundraryCollisionBouce = 1; // 1 means no force is lost upon wall collision (elastic), everything above 1 will cause a increase in force for every collision
 // 1000 units tolerance for the velocity, if it goes beyound that it's possible for the shapes to go out of bounds
 // NOTE! the corners don't have this tolerance as of now, might fix that later
 const Rectangle mapBoundraryUpper = {0, -1000, screenWidth, 1000};
@@ -212,8 +212,51 @@ void HandleRectBallCollision(balls_list_t *balls, rects_list_t *rects)
 {
 }
 
+void CalculateChangeInAngularVelocities(rect_t *rect1, rect_t *rect2, float I1, float I2, float velocityRelativeMagnitude)
+{
+    rect1->base.spinningVelocity -= velocityRelativeMagnitude * rect2->base.mass * (I1 + I2) / (I1 * I2);
+    rect2->base.spinningVelocity += velocityRelativeMagnitude * rect1->base.mass * (I1 + I2) / (I1 * I2);
+    
+}
+
+void CalculateRectRectCollisionVelocities(rect_t *rect1, rect_t *rect2, float velocityRelativeMagnitude, float angle, float restitution)
+{
+    float impulse = 2 * rect1->base.mass * rect2->base.mass * velocityRelativeMagnitude / (rect1->base.mass + rect2->base.mass);
+    Vector2 impulseVector = {impulse * cos(angle), impulse * sin(angle)};
+    rect1->base.velocity.x -= impulseVector.x * restitution / rect1->base.mass;
+    rect1->base.velocity.y -= impulseVector.y * restitution / rect1->base.mass;
+    rect2->base.velocity.x += impulseVector.x * restitution / rect2->base.mass;
+    rect2->base.velocity.y += impulseVector.y * restitution / rect2->base.mass;
+    
+}
+
+void CalculateCollisionRectRect(rect_t *rect1, rect_t *rect2)
+{
+    // calculate necessary data
+    float I1 = (rect1->size.y * rect1->size.y + rect1->size.x * rect1->size.x) / 12;
+    float I2 = (rect2->size.y * rect2->size.y + rect2->size.x * rect2->size.x) / 12;
+    float vrelX = rect1->base.velocity.x - rect2->base.velocity.x;
+    float vrelY = rect1->base.velocity.y - rect2->base.velocity.y;
+    float velocityRelativeMagnitude = sqrt(vrelX * vrelX + vrelY * vrelY);
+    float angle = atan2(vrelY, vrelY);
+    float velMagRect1 = sqrt(rect1->base.velocity.x * rect1->base.velocity.x + rect1->base.velocity.y * rect1->base.velocity.y);
+    float velMagRect2 = sqrt(rect2->base.velocity.x * rect2->base.velocity.x + rect2->base.velocity.y * rect2->base.velocity.y);
+    CalculateRectRectCollisionVelocities(rect1, rect2, velocityRelativeMagnitude, angle, 1);    // 1 for elastic collision
+    CalculateChangeInAngularVelocities(rect1, rect2, I1, I2, velocityRelativeMagnitude);
+}
+
 void HandleRectRectCollision(rects_list_t *rects)
 {
+    for (int i = 0; i < rects->pointer - 1; i++)
+    {
+        for (int j = i + 1; j < rects->pointer; j++)
+        {
+            if (CheckCollisionRecs(GetRectangleFromRect_t(rects->rects[i]), GetRectangleFromRect_t(rects->rects[j])))
+            {
+                CalculateCollisionRectRect(&rects->rects[i], &rects->rects[j]);
+            }
+        }
+    }
 }
 
 void HandleBallsCollisionVelocityChange(ball_t *ball1, ball_t *ball2, Vector2 normalVector, Vector2 tangentVector, float distanceBetweenBalls)
@@ -221,10 +264,10 @@ void HandleBallsCollisionVelocityChange(ball_t *ball1, ball_t *ball2, Vector2 no
     float unitX = normalVector.x / distanceBetweenBalls;
     float unitY = normalVector.y / distanceBetweenBalls;
 
-    float impulse = 2 * ball1->base.mass * ball2->base.mass * 
-    (ball1->base.velocity.x * unitX + ball1->base.velocity.y * unitY - 
-    (ball2->base.velocity.x * unitX + ball2->base.velocity.y * unitY)) / 
-    (ball1->base.mass + ball2->base.mass);
+    float impulse = 2 * ball1->base.mass * ball2->base.mass *
+                    (ball1->base.velocity.x * unitX + ball1->base.velocity.y * unitY -
+                     (ball2->base.velocity.x * unitX + ball2->base.velocity.y * unitY)) /
+                    (ball1->base.mass + ball2->base.mass);
 
     ball1->base.velocity.x -= impulse * unitX / ball1->base.mass;
     ball1->base.velocity.y -= impulse * unitY / ball1->base.mass;
@@ -290,13 +333,11 @@ float GetRadianBetweenBalls(ball_t *ball1, ball_t *ball2)
 void PushBallsApart(ball_t *ball1, ball_t *ball2, Vector2 normalVector, float distanceBetweenBalls)
 {
     // get data needed
-    //float radianBetweenBalls = GetRadianBetweenBalls(ball1, ball2);
+    // float radianBetweenBalls = GetRadianBetweenBalls(ball1, ball2);
     float intersectLength = ball1->radius + ball2->radius - distanceBetweenBalls;
     float unitX = normalVector.x / distanceBetweenBalls;
     float unitY = normalVector.y / distanceBetweenBalls;
     // move balls apart
-    // note to self: could there be a smarter way to calculate the sin and cos values?
-    // with the distanceBetweenBalls and normalVector, you got the entire triangle available
     ball1->base.position.x += unitX * intersectLength / 2;
     ball1->base.position.y += unitY * intersectLength / 2;
 
@@ -309,14 +350,14 @@ Vector2 GetNormalVector(Vector2 ball1, Vector2 ball2)
     return (Vector2){ball1.x - ball2.x, ball1.y - ball2.y};
 }
 
-void CalculateCollisionBallBall(balls_list_t *balls, int ball1, int ball2)
+void CalculateCollisionBallBall(ball_t *ball1, ball_t *ball2)
 {
-    Vector2 normalVector = GetNormalVector(balls->balls[ball1].base.position, balls->balls[ball2].base.position);
+    Vector2 normalVector = GetNormalVector(ball1->base.position, ball2->base.position);
     Vector2 tangentVector = (Vector2){-normalVector.y, normalVector.x};
     float distanceBetweenBalls = sqrt(normalVector.x * normalVector.x + normalVector.y * normalVector.y);
 
-    PushBallsApart(&balls->balls[ball1], &balls->balls[ball2], normalVector, distanceBetweenBalls);
-    HandleBallsCollisionVelocityChange(&balls->balls[ball1], &balls->balls[ball2], normalVector, tangentVector, distanceBetweenBalls);
+    PushBallsApart(ball1, ball2, normalVector, distanceBetweenBalls);
+    HandleBallsCollisionVelocityChange(ball1, ball2, normalVector, tangentVector, distanceBetweenBalls);
 }
 
 void HandleBallBallCollision(balls_list_t *balls)
@@ -327,7 +368,7 @@ void HandleBallBallCollision(balls_list_t *balls)
         {
             if (CheckCollisionCircles(balls->balls[i].base.position, balls->balls[i].radius, balls->balls[j].base.position, balls->balls[j].radius))
             {
-                CalculateCollisionBallBall(balls, i, j);
+                CalculateCollisionBallBall(&balls->balls[i], &balls->balls[j]);
             }
         }
     }
@@ -336,6 +377,15 @@ void HandleBallBallCollision(balls_list_t *balls)
 void HandleCollision(balls_list_t *balls, rects_list_t *rects)
 {
     HandleBallBallCollision(balls);
+    HandleRectRectCollision(rects);
+}
+
+void DrawRects(rects_list_t rects)
+{
+    for (int i = 0; i < rects.pointer; i++)
+    {
+        DrawRectanglePro(GetRectangleFromRect_t(rects.rects[i]), (Vector2){rects.rects[i].size.x / 2, rects.rects[i].size.y / 2}, rects.rects[i].base.radian, BLUE);
+    }
 }
 
 void DrawBalls(balls_list_t balls)
@@ -359,8 +409,11 @@ int main()
 
     HandleAddingBallToList(&balls, (ball_t){(shape_t){(Vector2){screenWidth / 2, screenHeight / 2}, 10, 0, (Vector2){0, 0}, 0, false}, 50});
     HandleAddingBallToList(&balls, (ball_t){(shape_t){(Vector2){screenWidth / 4, screenHeight / 4}, 10, 0, (Vector2){0, 0}, 0, false}, 50});
-    HandleAddingBallToList(&balls, (ball_t){(shape_t){(Vector2){3 * screenWidth / 4, 3 * screenHeight / 4}, 50, 0, (Vector2){0, 0}, 0, false}, 50});
+    HandleAddingBallToList(&balls, (ball_t){(shape_t){(Vector2){3 * screenWidth / 4, 3 * screenHeight / 4}, 10, 0, (Vector2){0, 0}, 0, false}, 50});
 
+    HandleAddingRectToList(&rects, (rect_t){(shape_t){(Vector2){100, 100}, 10, 0, (Vector2){0, 0}, 0, false}, (Vector2){100, 100}});
+    HandleAddingRectToList(&rects, (rect_t){(shape_t){(Vector2){300, 300}, 10, 0, (Vector2){0, 0}, 0, false}, (Vector2){100, 100}});
+    HandleAddingRectToList(&rects, (rect_t){(shape_t){(Vector2){500, 500}, 10, 0, (Vector2){0, 0}, 0, false}, (Vector2){100, 100}});
     while (!WindowShouldClose())
     {
         if (IsKeyDown(KEY_A) && selectedShape == -1)
@@ -373,10 +426,6 @@ int main()
         }
 
         HandleCollision(&balls, &rects);
-        BeginDrawing();
-
-        ClearBackground(LIGHTGRAY);
-        DrawBalls(balls);
         Gravity(&balls, &rects);
         MoveShapes(&balls, &rects);
         HandleMapWallCollision(&balls, &rects);
@@ -391,6 +440,12 @@ int main()
                 MoveShapeBasedOnMousePosition(&balls.balls[selectedShape].base.position, &balls.balls[selectedShape].base.velocity, mouseShapeOffset);
             }
         }
+
+        BeginDrawing();
+
+        ClearBackground(LIGHTGRAY);
+        DrawBalls(balls);
+        DrawRects(rects);
 #ifdef DEV_MODE
         DrawText(TextFormat("ball 1 data\n"
                             "position x:y - %.2f:%.2f\n"
