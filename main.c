@@ -174,37 +174,7 @@ void MoveShapes(balls_list_t *balls, rects_list_t *rects)
     for (int i = 0; i < rects->pointer; i++)
     {
         MoveShapeWithVelocity(&rects->rects[i].base.position, rects->rects[i].base.velocity);
-    }
-}
-
-void HandleMapWallCollision(balls_list_t *balls, rects_list_t *rects)
-{
-    for (int i = 0; i < balls->pointer; i++)
-    {
-        if (CheckCollisionCircleRec(balls->balls[i].base.position, balls->balls[i].radius, mapBoundraryUpper))
-        {
-            balls->balls[i].base.velocity.y *= -mapBoundraryCollisionBouce;
-            balls->balls[i].base.position.y = 0 + balls->balls[i].radius; // makes sure that the circle cannot go inside the map boundrary
-        }
-        else if (CheckCollisionCircleRec(balls->balls[i].base.position, balls->balls[i].radius, mapBoundraryLower))
-        {
-            balls->balls[i].base.velocity.y *= -mapBoundraryCollisionBouce;
-            balls->balls[i].base.position.y = screenHeight - balls->balls[i].radius; // makes sure that the circle cannot go inside the map boundrary
-        }
-        if (CheckCollisionCircleRec(balls->balls[i].base.position, balls->balls[i].radius, mapBoundraryLeft))
-        {
-            balls->balls[i].base.velocity.x *= -mapBoundraryCollisionBouce;
-            balls->balls[i].base.position.x = 0 + balls->balls[i].radius; // makes sure that the circle cannot go inside the map boundrary
-        }
-        else if (CheckCollisionCircleRec(balls->balls[i].base.position, balls->balls[i].radius, mapBoundraryRight))
-        {
-            balls->balls[i].base.velocity.x *= -mapBoundraryCollisionBouce;
-            balls->balls[i].base.position.x = screenWidth - balls->balls[i].radius; // makes sure that the circle cannot go inside the map boundrary
-        }
-    }
-    for (int i = 0; i < rects->pointer; i++)
-    {
-        // add later
+        rects->rects[i].base.radian += rects->rects[i].base.spinningVelocity;
     }
 }
 
@@ -216,7 +186,6 @@ void CalculateChangeInAngularVelocities(rect_t *rect1, rect_t *rect2, float I1, 
 {
     rect1->base.spinningVelocity -= velocityRelativeMagnitude * rect2->base.mass * (I1 + I2) / (I1 * I2);
     rect2->base.spinningVelocity += velocityRelativeMagnitude * rect1->base.mass * (I1 + I2) / (I1 * I2);
-    
 }
 
 void CalculateRectRectCollisionVelocities(rect_t *rect1, rect_t *rect2, float velocityRelativeMagnitude, float angle, float restitution)
@@ -227,7 +196,42 @@ void CalculateRectRectCollisionVelocities(rect_t *rect1, rect_t *rect2, float ve
     rect1->base.velocity.y -= impulseVector.y * restitution / rect1->base.mass;
     rect2->base.velocity.x += impulseVector.x * restitution / rect2->base.mass;
     rect2->base.velocity.y += impulseVector.y * restitution / rect2->base.mass;
-    
+}
+
+void MoveRectsApart(rect_t *rect1, rect_t *rect2)
+{
+    Vector2 collisionNormal = {rect2->base.position.x - rect1->base.position.x, rect2->base.position.y - rect1->base.position.y};
+    float distanceBetweenRectCenters = sqrt(collisionNormal.x * collisionNormal.x + collisionNormal.y * collisionNormal.y);
+
+    collisionNormal.x /= distanceBetweenRectCenters;
+    collisionNormal.y /= distanceBetweenRectCenters;
+
+    float overlapX = ((rect1->size.x / 2) + (rect2->size.x / 2)) - fabs(collisionNormal.x * distanceBetweenRectCenters);
+    float overlapY = ((rect1->size.y / 2) + (rect2->size.y / 2)) - fabs(collisionNormal.y * distanceBetweenRectCenters);
+    // rect1->base.position.x -= overlapX * 0.5;
+    // rect2->base.position.x += overlapX * 0.5;
+    // rect1->base.position.y -= overlapY * 0.5;
+    // rect2->base.position.y += overlapY * 0.5;
+    if (collisionNormal.x < 0)
+    {
+        rect1->base.position.x += overlapX / 2;
+        rect2->base.position.x -= overlapX / 2;
+    }
+    else
+    {
+        rect1->base.position.x -= overlapX / 2;
+        rect2->base.position.x += overlapX / 2;
+    }
+    if (collisionNormal.y < 0)
+    {
+        rect1->base.position.y += overlapY / 2;
+        rect2->base.position.y -= overlapY / 2;
+    }
+    else
+    {
+        rect1->base.position.y -= overlapY / 2;
+        rect2->base.position.y += overlapY / 2;
+    }
 }
 
 void CalculateCollisionRectRect(rect_t *rect1, rect_t *rect2)
@@ -241,7 +245,8 @@ void CalculateCollisionRectRect(rect_t *rect1, rect_t *rect2)
     float angle = atan2(vrelY, vrelY);
     float velMagRect1 = sqrt(rect1->base.velocity.x * rect1->base.velocity.x + rect1->base.velocity.y * rect1->base.velocity.y);
     float velMagRect2 = sqrt(rect2->base.velocity.x * rect2->base.velocity.x + rect2->base.velocity.y * rect2->base.velocity.y);
-    CalculateRectRectCollisionVelocities(rect1, rect2, velocityRelativeMagnitude, angle, 1);    // 1 for elastic collision
+    MoveRectsApart(rect1, rect2);
+    CalculateRectRectCollisionVelocities(rect1, rect2, velocityRelativeMagnitude, angle, 0.5); // 1 for elastic collision
     CalculateChangeInAngularVelocities(rect1, rect2, I1, I2, velocityRelativeMagnitude);
 }
 
@@ -380,11 +385,76 @@ void HandleCollision(balls_list_t *balls, rects_list_t *rects)
     HandleRectRectCollision(rects);
 }
 
+void HandleMapWallCollision(balls_list_t *balls, rects_list_t *rects)
+{
+    for (int i = 0; i < balls->pointer; i++)
+    {
+        if (CheckCollisionCircleRec(balls->balls[i].base.position, balls->balls[i].radius, mapBoundraryUpper))
+        {
+            balls->balls[i].base.velocity.y *= -mapBoundraryCollisionBouce;
+            balls->balls[i].base.position.y = 0 + balls->balls[i].radius; // makes sure that the circle cannot go inside the map boundrary
+        }
+        else if (CheckCollisionCircleRec(balls->balls[i].base.position, balls->balls[i].radius, mapBoundraryLower))
+        {
+            balls->balls[i].base.velocity.y *= -mapBoundraryCollisionBouce;
+            balls->balls[i].base.position.y = screenHeight - balls->balls[i].radius; // makes sure that the circle cannot go inside the map boundrary
+        }
+        if (CheckCollisionCircleRec(balls->balls[i].base.position, balls->balls[i].radius, mapBoundraryLeft))
+        {
+            balls->balls[i].base.velocity.x *= -mapBoundraryCollisionBouce;
+            balls->balls[i].base.position.x = 0 + balls->balls[i].radius; // makes sure that the circle cannot go inside the map boundrary
+        }
+        else if (CheckCollisionCircleRec(balls->balls[i].base.position, balls->balls[i].radius, mapBoundraryRight))
+        {
+            balls->balls[i].base.velocity.x *= -mapBoundraryCollisionBouce;
+            balls->balls[i].base.position.x = screenWidth - balls->balls[i].radius; // makes sure that the circle cannot go inside the map boundrary
+        }
+    }
+    for (int i = 0; i < rects->pointer; i++)
+    {
+        if (CheckCollisionRecs(GetRectangleFromRect_t(rects->rects[i]), mapBoundraryUpper))
+        {
+            rects->rects[i].base.velocity.y *= -1;
+            rects->rects[i].base.position.y = 0;
+
+            // rect_t tempMapBoundraryUpper = (rect_t){(shape_t){(Vector2){mapBoundraryUpper.x, mapBoundraryUpper.y}, 1000, 0, (Vector2){0, 0}, 0, false}, (Vector2){mapBoundraryUpper.width, mapBoundraryUpper.height}};
+            // CalculateCollisionRectRect(&rects->rects[i], &tempMapBoundraryUpper);
+        }
+        else if (CheckCollisionRecs(GetRectangleFromRect_t(rects->rects[i]), mapBoundraryLower))
+        {
+            rects->rects[i].base.velocity.y *= -1;
+            rects->rects[i].base.position.y = screenHeight - rects->rects[i].size.y;
+            // rect_t tempMapBoundraryLower = (rect_t){(shape_t){(Vector2){mapBoundraryLower.x, mapBoundraryLower.y}, 1000, 0, (Vector2){0, 0}, 0, false}, (Vector2){mapBoundraryLower.width, mapBoundraryLower.height}};
+            // CalculateCollisionRectRect(&rects->rects[i], &tempMapBoundraryLower);
+        }
+        if (CheckCollisionRecs(GetRectangleFromRect_t(rects->rects[i]), mapBoundraryLeft))
+        {
+            rects->rects[i].base.velocity.x *= -1;
+            rects->rects[i].base.position.x = 0;
+            
+            // rect_t tempMapBoundraryLeft = (rect_t){(shape_t){(Vector2){mapBoundraryLeft.x, mapBoundraryLeft.y}, 1000, 0, (Vector2){0, 0}, 0, false}, (Vector2){mapBoundraryLeft.width, mapBoundraryLeft.height}};
+            // CalculateCollisionRectRect(&rects->rects[i], &tempMapBoundraryLeft);
+        }
+        else if (CheckCollisionRecs(GetRectangleFromRect_t(rects->rects[i]), mapBoundraryRight))
+        {
+            rects->rects[i].base.velocity.x *= -1;
+            rects->rects[i].base.position.x = screenWidth - rects->rects[i].size.x;
+            // rect_t tempMapBoundraryRight = (rect_t){(shape_t){(Vector2){mapBoundraryRight.x, mapBoundraryRight.y}, 1000, 0, (Vector2){0, 0}, 0, false}, (Vector2){mapBoundraryRight.width, mapBoundraryRight.height}};
+            // CalculateCollisionRectRect(&rects->rects[i], &tempMapBoundraryRight);
+        }
+    }
+}
+
 void DrawRects(rects_list_t rects)
 {
     for (int i = 0; i < rects.pointer; i++)
     {
-        DrawRectanglePro(GetRectangleFromRect_t(rects.rects[i]), (Vector2){rects.rects[i].size.x / 2, rects.rects[i].size.y / 2}, rects.rects[i].base.radian, BLUE);
+
+        Rectangle rect = GetRectangleFromRect_t(rects.rects[i]);
+        // due to how DrawRectanglePro works, this is needed for collision to work correctly
+        rect.x += rect.width / 2;
+        rect.y += rect.height / 2;
+        DrawRectanglePro(rect, (Vector2){rects.rects[i].size.x / 2, rects.rects[i].size.y / 2}, rects.rects[i].base.radian, BLUE);
     }
 }
 
@@ -416,13 +486,25 @@ int main()
     HandleAddingRectToList(&rects, (rect_t){(shape_t){(Vector2){500, 500}, 10, 0, (Vector2){0, 0}, 0, false}, (Vector2){100, 100}});
     while (!WindowShouldClose())
     {
-        if (IsKeyDown(KEY_A) && selectedShape == -1)
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && selectedShape == -1)
         {
             selectedShape = GrabShape(GetMousePosition(), &balls, &rects, &mouseShapeOffset);
         }
-        if (IsKeyReleased(KEY_A))
+        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
         {
             selectedShape = -1;
+        }
+        if (IsKeyPressed(KEY_R))
+        {
+            rects.rects[0].base.position = (Vector2){100, 100};
+            rects.rects[1].base.position = (Vector2){300, 300};
+            rects.rects[2].base.position = (Vector2){500, 500};
+            rects.rects[0].base.velocity = (Vector2){0, 0};
+            rects.rects[1].base.velocity = (Vector2){0, 0};
+            rects.rects[2].base.velocity = (Vector2){0, 0};
+            rects.rects[0].base.spinningVelocity = 0;
+            rects.rects[1].base.spinningVelocity = 0;
+            rects.rects[2].base.spinningVelocity = 0;
         }
 
         HandleCollision(&balls, &rects);
@@ -456,8 +538,20 @@ int main()
                             balls.balls[0].base.velocity.x, balls.balls[0].base.velocity.y,
                             selectedShape, IsKeyDown(KEY_A)),
                  20, 20, 20, DARKGREEN);
+        DrawText(TextFormat("rect 1 data\n"
+                            "position x:y - %.2f:%.2f\n"
+                            "velocity x:y - %.2f:%.2f\n"
+                            "spinning velocity: %.2f\n"
+                            "is holding left mouse button: %d",
+                            rects.rects[0].base.position.x, rects.rects[0].base.position.y,
+                            rects.rects[0].base.velocity.x, rects.rects[0].base.velocity.y,
+                            rects.rects[0].base.spinningVelocity, IsKeyDown(KEY_A)),
+                 20, 200, 20, PURPLE);
 #endif
         EndDrawing();
     }
+    // free lists
+    free(balls.balls);
+    free(rects.rects);
     return 0;
 }
